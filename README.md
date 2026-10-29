@@ -8,20 +8,23 @@ An interactive 2D/3D map of my Obsidian second brain built from [Works in Progre
 
 ## What you're looking at
 
-The vault has three layers, and the graph keeps them:
+The vault has three layers, and the diagram keeps them as printed marks:
 
-| Layer | In the graph |
+| Layer | Mark |
 | --- | --- |
-| **Essays** (`#source`), one per Works in Progress article | small pale nodes |
-| **Mechanisms** (`#mechanism`), one reusable causal claim each | nodes coloured by their field |
-| **Domains** (`#domain`), the broad problem spaces | large glowing hubs with labels |
+| **Domains** (`#domain`), the broad problem spaces | ■ labelled squares |
+| **Mechanisms** (`#mechanism`), one reusable causal claim each | ● ink dots |
+| **Essays** (`#source`), one per Works in Progress article | ◆ open diamonds |
 
-Every `[[wikilink]]` in the vault is an edge.
+Every `[[wikilink]]` in the vault is a pencil-weight line.
 
-- **3D / 2D:** spin the brain in 3D, or flatten it into a map you can pan and zoom.
-- **Click any note:** see its core claim, a link to the original essay, and a 2D local graph of its neighbours. Hovering a neighbour lights it up in the main view.
+- **2D / 3D:** it opens as a flat diagram you can pan and zoom. Switch to 3D and it lifts into a brain you can spin.
+- **INK / FIELDS:** ink keeps everything monochrome, with orange marking only what you've selected. Fields colours the 22 domains by six fields. The fields are found by modularity clustering on how densely the domains cross-link, which is the only use the brand allows its categorical palette.
+- **Click any note:** see its core claim, a link to the original essay, and *Fig. 01*, a 2D local graph of its neighbours. Hovering a neighbour lights it up in the main diagram.
 - **Timeline:** press play to watch the brain grow issue by issue.
-- **Search:** press `/`. Domains in the legend are clickable. Every note has a shareable link (`…/wip-brain/#Note Title`).
+- **Search:** press `/`. Domains in the index are clickable. Every note has a shareable link (`…/wip-brain/#Note Title`).
+
+The look follows the [PROFSARTHAK design system](https://github.com/profsarthak/personal-brand): bone paper and a hairline drafting grid, near-black ink, one hot-orange accent, square cards with hard offset shadows, folder tabs and crop marks, a `SYS.TIME` status bar, and Space Grotesk / Space Mono / IBM Plex Sans.
 
 ## Updating it
 
@@ -46,7 +49,7 @@ Only note titles, links, issue numbers, domain membership, and the first paragra
 
 ## How it's built
 
-- `publish.py`: standard-library Python. It parses the vault's folders, tags, sections and wikilinks.
-- `docs/`: a static page with no build step. It uses [3d-force-graph](https://github.com/vasturiano/3d-force-graph) on three.js with bloom, HTML labels for domains, and a hand-drawn SVG for the 2D local graph.
+- `publish.py`: standard-library Python. It parses the vault's folders, tags, sections and wikilinks, and groups domains into fields.
+- `docs/`: a static page with no build step. It uses [3d-force-graph](https://github.com/vasturiano/3d-force-graph) on three.js, with flat sprite marks, HTML labels for domains, and a hand-drawn SVG for the local graph. Brand tokens live at the top of `docs/style.css`.
 
 Unofficial reader project. Essays © their authors.

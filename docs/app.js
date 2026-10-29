@@ -1,26 +1,29 @@
 import * as THREE from 'three';
 import ForceGraph3D from '3d-force-graph';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 
 const TYPES = ['domain', 'mechanism', 'source'];
 const TYPE_LABEL = { domain: 'Domain', mechanism: 'Mechanism', source: 'Essay' };
 const TYPE_PLURAL = { domain: 'Domains', mechanism: 'Mechanisms', source: 'Essays' };
-// [saturation, lightness] per note type: domains glow hardest, essays read as pale "inputs".
-const TONE = { domain: [88, 70], mechanism: [74, 60], source: [38, 86] };
+const TYPE_NUM = { domain: '■', mechanism: '●', source: '◆' };
+const REL = 2.4; // glyph size per cube-root of a note's weight
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const hsl = (h, s, l) => `hsl(${h}, ${s}%, ${l}%)`;
+const pad = (i) => `/${String(i).padStart(2, '0')}`;
 const jitter = () => (Math.random() - 0.5) * 12;
+const rgba = (hex, a) => {
+  const v = parseInt(hex.slice(1), 16);
+  return `rgba(${v >> 16}, ${(v >> 8) & 255}, ${v & 255}, ${a})`;
+};
 
 try {
   await main();
 } catch (err) {
   console.error(err);
   $('#loading').classList.add('error');
-  $('#loading span').textContent = `Couldn't start the visualisation (${err.message}). It needs a browser with WebGL enabled.`;
+  $('#loading span').textContent = `Couldn't start the diagram (${err.message}). It needs a browser with WebGL enabled.`;
 }
 
 async function main() {
@@ -28,6 +31,16 @@ async function main() {
     if (!r.ok) throw new Error(`graph.json: HTTP ${r.status}`);
     return r.json();
   });
+
+  // Colours come from the brand tokens in style.css, so the stylesheet stays the single source.
+  const css = getComputedStyle(document.documentElement);
+  const tok = (name) => css.getPropertyValue(`--${name}`).trim();
+  const INK = tok('ink-900');
+  const INK_SOFT = tok('ink-700');
+  const MUTED = tok('ink-500');
+  const PAPER = tok('paper');
+  const ORANGE = tok('orange-500');
+  const CAT = [1, 2, 3, 4, 5, 6].map((i) => tok(`cat-${i}`));
 
   // ---------- data ----------
   const nodes = data.nodes;
@@ -43,16 +56,37 @@ async function main() {
   }
   for (const n of nodes) n.deg = adj.get(n).size;
 
-  const hues = new Map(data.domainOrder.map((id, i) => [id, Math.round((205 + (i * 360) / data.domainOrder.length) % 360)]));
-  const hueOf = (n) => hues.get(n.domain) ?? 40;
-  const colorOf = (n) => hsl(hueOf(n), ...TONE[n.type]);
-  const linkHue = (l) => hueOf(l.source.type === 'mechanism' ? l.source : l.target);
-  const issueLabel = (n) => (n.type === 'source' ? `Issue ${n.issue}` : `Since issue ${n.issue}`);
+  const fieldOf = (n) => byId.get(n.domain)?.field;
+  const catOf = (n) => CAT[fieldOf(n)] ?? MUTED;
+  const issueLabel = (n) => (n.type === 'source' ? `Issue ${pad(n.issue)}` : `Since ${pad(n.issue)}`);
   const valOf = (n) => (n.type === 'domain' ? 30 + n.deg * 0.4 : n.type === 'source' ? 1.4 + n.deg * 0.3 : 0.7 + n.deg * 0.45);
+  const sizeOf = (n) => 2 * REL * Math.cbrt(valOf(n)) * (n.type === 'domain' ? 1.15 : 1);
 
-  const state = { issue: data.issues, types: { domain: true, mechanism: true, source: true }, mode: '3d', hover: null, selected: null };
+  const state = {
+    issue: data.issues,
+    types: { domain: true, mechanism: true, source: true },
+    mode: '2d',
+    colour: 'ink',
+    hover: null,
+    selected: null,
+  };
   const hl = { focus: null, nodes: new Set(), links: new Set() };
   let visibleLinks = links;
+
+  // Ink mode: everything is ink on paper and orange is the only emphasis. Fields mode: the brand's
+  // categorical palette marks each field, so emphasis falls back to heavy ink.
+  const accent = () => (state.colour === 'ink' ? ORANGE : INK);
+  const fillOf = (n) => {
+    if (n.type === 'source') return PAPER;
+    if (state.colour === 'fields') return catOf(n);
+    return n.type === 'domain' ? INK : INK_SOFT;
+  };
+  const mechEnd = (l) => (l.source.type === 'mechanism' ? l.source : l.target);
+  const linkColor = (l) => {
+    if (hl.links.has(l)) return accent();
+    if (hl.focus) return rgba(INK, 0.035);
+    return state.colour === 'fields' ? rgba(catOf(mechEnd(l)), 0.26) : rgba(INK, 0.13);
+  };
 
   function visibleData() {
     const vis = nodes.filter((n) => n.issue <= state.issue && state.types[n.type]);
@@ -60,7 +94,7 @@ async function main() {
     for (const n of vis) {
       if (state.mode === '2d') { delete n.z; delete n.vz; }
       if (n.x === undefined) {
-        // Newly revealed notes sprout next to a note that's already on screen.
+        // Newly revealed notes sprout next to a note that's already on the sheet.
         const anchor = [...adj.get(n)].find((m) => on.has(m) && m.x !== undefined);
         if (anchor) {
           n.x = anchor.x + jitter();
@@ -72,10 +106,11 @@ async function main() {
     visibleLinks = links.filter((l) => on.has(l.source) && on.has(l.target));
     return { nodes: vis, links: visibleLinks };
   }
+  const isVisible = (n) => n.issue <= state.issue && state.types[n.type];
 
   // A hidden domain's HTML label can outlive its 3D object (it showed up as doubled labels during
   // timeline playback), so sweep labels once the graph has digested each update. Domains with only
-  // a handful of notes on screen get a faint label so early timeline frames aren't a pile of text.
+  // a handful of notes on the sheet get a faint label so early timeline frames aren't a pile of text.
   function syncLabels() {
     const on = new Set(Graph.graphData().nodes);
     for (const [n, el] of labelEls) {
@@ -87,55 +122,97 @@ async function main() {
       for (const m of adj.get(n)) if (on.has(m)) live++;
       el.classList.toggle('faint', live < 6);
     }
+    paintNodes();
   }
   function updateGraph() {
     Graph.graphData(visibleData());
     for (const ms of [50, 400]) setTimeout(syncLabels, ms);
   }
-  const isVisible = (n) => n.issue <= state.issue && state.types[n.type];
+
+  // ---------- glyphs ----------
+  // Each note is a flat printed mark that always faces the viewer: ■ domain, ● mechanism, ◆ essay.
+  // Textures are white fill + black stroke, so tinting a sprite recolours the fill and keeps the ink line.
+  const glyphTexture = (type) => {
+    const S = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = S;
+    const g = canvas.getContext('2d');
+    const lw = type === 'source' ? 16 : type === 'domain' ? 9 : 11;
+    const m = lw / 2 + 3;
+    g.lineWidth = lw;
+    g.lineJoin = 'miter';
+    g.fillStyle = '#fff';
+    g.strokeStyle = '#000';
+    g.beginPath();
+    if (type === 'domain') g.rect(m, m, S - 2 * m, S - 2 * m);
+    else if (type === 'source') {
+      g.moveTo(S / 2, m);
+      g.lineTo(S - m, S / 2);
+      g.lineTo(S / 2, S - m);
+      g.lineTo(m, S / 2);
+      g.closePath();
+    } else g.arc(S / 2, S / 2, S / 2 - m, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  };
+  const textures = Object.fromEntries(TYPES.map((t) => [t, glyphTexture(t)]));
+  const ORDER = { mechanism: 1, source: 2, domain: 3 };
+
+  const labelEls = new Map();
+  function nodeObject(n) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: textures[n.type], color: fillOf(n), transparent: true, depthWrite: false,
+    }));
+    const s = sizeOf(n);
+    sprite.scale.set(s, s, 1);
+    sprite.userData.size = s;
+    sprite.renderOrder = ORDER[n.type];
+    if (n.type === 'domain') {
+      const el = document.createElement('div');
+      el.className = 'dlabel';
+      el.style.setProperty('--c', catOf(n));
+      el.innerHTML = `<span><i></i>${esc(n.title)}</span>`;
+      labelEls.get(n)?.remove();
+      labelEls.set(n, el);
+      sprite.add(new CSS2DObject(el));
+    }
+    return sprite;
+  }
+
+  function paintNodes() {
+    for (const n of Graph.graphData().nodes) {
+      const sprite = n.__threeObj;
+      if (!sprite?.material) continue;
+      const focus = n === hl.focus;
+      sprite.material.color.set(focus && state.colour === 'ink' ? ORANGE : fillOf(n));
+      sprite.material.opacity = hl.focus && !hl.nodes.has(n) ? 0.14 : 1;
+      const s = sprite.userData.size * (focus ? 1.45 : 1);
+      sprite.scale.set(s, s, 1);
+    }
+  }
 
   // ---------- scene ----------
-  const labelEls = new Map();
-  const domainLabel = (n) => {
-    if (n.type !== 'domain') return null;
-    const el = document.createElement('div');
-    el.className = 'dlabel';
-    el.style.setProperty('--c', colorOf(n));
-    el.innerHTML = `<span>${esc(n.title)}</span>`;
-    labelEls.get(n)?.remove();
-    labelEls.set(n, el);
-    return new CSS2DObject(el);
-  };
-  const nodeColor = (n) => {
-    if (n === hl.focus) return hsl(hueOf(n), 95, 86);
-    if (hl.focus && !hl.nodes.has(n)) return hsl(hueOf(n), 18, 14);
-    return colorOf(n);
-  };
-  const linkColor = (l) => {
-    if (hl.links.has(l)) return hsl(linkHue(l), 85, 74);
-    return hl.focus ? hsl(linkHue(l), 15, 8) : hsl(linkHue(l), 45, 30);
-  };
-
   const Graph = new ForceGraph3D($('#graph'), { controlType: 'orbit', extraRenderers: [new CSS2DRenderer()] })
     .width(innerWidth)
     .height(innerHeight)
-    .backgroundColor('#05060a')
+    .backgroundColor('rgba(0,0,0,0)')
     .showNavInfo(false)
-    .nodeRelSize(2.4)
+    .numDimensions(2)
+    .nodeRelSize(REL)
     .nodeVal(valOf)
-    .nodeResolution(12)
-    .nodeOpacity(0.95)
-    .nodeColor(nodeColor)
-    .nodeLabel((n) => `<div class="tip"><span style="color:${colorOf(n)}">${TYPE_LABEL[n.type]} · ${issueLabel(n)}</span>${esc(n.title)}</div>`)
-    .nodeThreeObjectExtend(true)
-    .nodeThreeObject(domainLabel)
+    .nodeThreeObject(nodeObject)
+    .nodeLabel((n) => `<div class="tip"><span>${TYPE_NUM[n.type]} ${TYPE_LABEL[n.type]} · ${issueLabel(n)}</span>${esc(n.title)}</div>`)
     .linkColor(linkColor)
-    .linkOpacity(0.55)
-    .linkWidth((l) => (hl.links.has(l) ? 0.6 : 0))
+    .linkOpacity(1)
+    .linkWidth((l) => (hl.links.has(l) ? 0.45 : 0))
     .linkDirectionalParticles((l) => (hl.links.has(l) ? 2 : 0))
-    .linkDirectionalParticleWidth(1.5)
-    .linkDirectionalParticleSpeed(0.007)
-    .linkDirectionalParticleColor((l) => hsl(linkHue(l), 90, 82))
+    .linkDirectionalParticleWidth((l) => (hl.links.has(l) ? 1.8 : 1.2))
+    .linkDirectionalParticleSpeed(0.005)
+    .linkDirectionalParticleColor((l) => (hl.links.has(l) ? accent() : MUTED))
     .cooldownTime(15000)
     .onNodeHover((n) => {
       state.hover = n;
@@ -151,9 +228,7 @@ async function main() {
     state.hover = null;
     refresh();
   });
-  Graph.renderer().setPixelRatio(Math.min(devicePixelRatio, 1.75));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.95, 0.4, 0.1);
-  Graph.postProcessingComposer().addPass(bloom);
+  Graph.renderer().setPixelRatio(Math.min(devicePixelRatio, 2));
 
   function applyForces() {
     Graph.d3Force('charge').strength(state.mode === '3d' ? -48 : -32).distanceMax(500);
@@ -162,7 +237,17 @@ async function main() {
   applyForces();
 
   const controls = Graph.controls();
-  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, autoRotate: !reducedMotion, autoRotateSpeed: 0.35 });
+  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, autoRotate: false, autoRotateSpeed: 0.35 });
+  function applyControls() {
+    const flat = state.mode === '2d';
+    controls.enableRotate = !flat;
+    controls.screenSpacePanning = true;
+    controls.mouseButtons.LEFT = flat ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    controls.touches.ONE = flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+  }
+  applyControls();
+  Graph.cameraPosition({ x: 0, y: 0, z: 1400 }, { x: 0, y: 0, z: 0 });
+
   let touched = false;
   let lastTouch = 0;
   let idleTimer;
@@ -192,18 +277,38 @@ async function main() {
     setTimeout(() => lastTouch < asked && !state.selected && Graph.zoomToFit(1200, 40), 2600);
   }
 
-  addEventListener('resize', () => {
-    Graph.width(innerWidth).height(innerHeight);
-    bloom.setSize(innerWidth, innerHeight);
-  });
+  addEventListener('resize', () => Graph.width(innerWidth).height(innerHeight));
 
-  // Ambient "neural firing": sparks run along random visible connections while nothing is focused.
+  // Ambient signal: small ink packets travel random connections while nothing is focused.
   if (!reducedMotion) {
     setInterval(() => {
       if (document.hidden || hl.focus || !visibleLinks.length) return;
-      for (let k = 0; k < 3; k++) Graph.emitParticle(visibleLinks[(Math.random() * visibleLinks.length) | 0]);
-    }, 160);
+      for (let k = 0; k < 2; k++) Graph.emitParticle(visibleLinks[(Math.random() * visibleLinks.length) | 0]);
+    }, 220);
   }
+
+  // ---------- status bar ----------
+  const c = data.counts;
+  $('#sb-counts').textContent = `N=${c.notes} · E=${c.links.toLocaleString()}`;
+  const clock = () => {
+    const t = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
+    $('#sb-time').textContent = `SYS.TIME ${t} · IST UTC+5:30`;
+  };
+  clock();
+  setInterval(clock, 1000);
+  const coord = (v) => `${v < 0 ? '−' : '+'}${String(Math.abs(Math.round(v))).padStart(4, '0')}`;
+  let camQueued = false;
+  const showCamera = () => {
+    if (camQueued) return;
+    camQueued = true;
+    requestAnimationFrame(() => {
+      camQueued = false;
+      const p = Graph.cameraPosition();
+      $('#sb-cam').textContent = `VIEW ${state.mode.toUpperCase()} · CAM X${coord(p.x)} Y${coord(p.y)} Z${coord(p.z)}`;
+    });
+  };
+  controls.addEventListener('change', showCamera);
+  showCamera();
 
   // ---------- highlight ----------
   let queued = false;
@@ -216,11 +321,14 @@ async function main() {
       hl.focus = f;
       hl.nodes = new Set(f ? [f, ...adj.get(f)] : []);
       hl.links = new Set(f ? linksOf.get(f) : []);
-      Graph.nodeColor(Graph.nodeColor())
-        .linkColor(Graph.linkColor())
+      paintNodes();
+      Graph.linkColor(Graph.linkColor())
         .linkWidth(Graph.linkWidth())
         .linkDirectionalParticles(Graph.linkDirectionalParticles());
-      for (const [n, el] of labelEls) el.classList.toggle('dim', !!f && !hl.nodes.has(n));
+      for (const [n, el] of labelEls) {
+        el.classList.toggle('dim', !!f && !hl.nodes.has(n));
+        el.classList.toggle('focus', n === f);
+      }
       for (const b of document.querySelectorAll('#domains button')) b.classList.toggle('active', !!f && +b.dataset.id === f.id);
     });
   }
@@ -273,15 +381,12 @@ async function main() {
     if (mode === state.mode) return;
     state.mode = mode;
     syncControls();
+    applyControls();
     const d = camDistance();
     if (mode === '2d') {
       controls.autoRotate = false;
-      controls.enableRotate = false;
-      controls.screenSpacePanning = true;
-      controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
-      controls.touches.ONE = THREE.TOUCH.PAN;
       Graph.cameraPosition({ x: 0, y: 0, z: Math.max(d, 700) }, { x: 0, y: 0, z: 0 }, 1000);
-      // Squash z to 0 over a second while the layout keeps running, then hand over to a 2D simulation.
+      // Press the brain flat over a second while the layout keeps running, then hand over to 2D.
       const squash = Graph.graphData().nodes.map((n) => [n, n.z || 0]);
       Graph.d3ReheatSimulation();
       const t0 = performance.now();
@@ -299,10 +404,7 @@ async function main() {
       };
       requestAnimationFrame(step);
     } else {
-      controls.enableRotate = true;
-      controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-      controls.touches.ONE = THREE.TOUCH.ROTATE;
-      // Start from a nearly flat sheet; repulsion inflates it back into a 3D brain.
+      // Start from a nearly flat sheet; repulsion lifts it into a 3D brain.
       for (const n of nodes) {
         n.z = (Math.random() - 0.5) * 6;
         n.vz = 0;
@@ -312,12 +414,29 @@ async function main() {
       const far = Math.max(d, 700);
       Graph.cameraPosition({ x: far * 0.55, y: far * 0.2, z: far * 0.8 }, { x: 0, y: 0, z: 0 }, 1200);
       if (!state.selected) setTimeout(fitSoon, 1300);
+      controls.autoRotate = !reducedMotion && !state.selected;
     }
+    showCamera();
+  }
+
+  function setColour(colour) {
+    if (colour === state.colour) return;
+    state.colour = colour;
+    document.body.classList.toggle('fields', colour === 'fields');
+    syncControls();
+    refresh();
+    if (state.selected) renderPanel(state.selected);
   }
 
   // ---------- timeline ----------
   const range = $('#issue');
   range.max = data.issues;
+  $('#ticks').innerHTML = Array.from({ length: data.issues }, (_, i) => {
+    const n = i + 1;
+    const label = n === 1 || n === data.issues || n % 5 === 0 ? ` data-n="${String(n).padStart(2, '0')}"` : '';
+    return `<i${label}></i>`;
+  }).join('');
+  const ticks = [...document.querySelectorAll('#ticks i')];
   let playTimer = null;
 
   function setIssue(i) {
@@ -343,12 +462,14 @@ async function main() {
 
   function syncControls() {
     range.value = state.issue;
+    ticks.forEach((t, i) => t.classList.toggle('on', i < state.issue));
     const shown = Graph.graphData().nodes.length;
-    $('#tl-label').innerHTML = `<b>Issue ${state.issue}</b> / ${data.issues} · ${shown} notes`;
+    $('#tl-label').innerHTML = `<b>Issue ${String(state.issue).padStart(2, '0')}</b> / ${String(data.issues).padStart(2, '0')} · n=${shown}`;
     $('#play').classList.toggle('playing', !!playTimer);
     $('#play').setAttribute('aria-label', playTimer ? 'Pause' : 'Play the brain growing issue by issue');
     for (const b of document.querySelectorAll('#types button')) b.setAttribute('aria-pressed', String(state.types[b.dataset.type]));
     for (const b of document.querySelectorAll('#view button')) b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode));
+    for (const b of document.querySelectorAll('#colour button')) b.setAttribute('aria-pressed', String(b.dataset.colour === state.colour));
   }
 
   range.addEventListener('input', () => {
@@ -361,16 +482,20 @@ async function main() {
     const b = e.target.closest('[data-mode]');
     if (b) setMode(b.dataset.mode);
   });
+  $('#colour').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-colour]');
+    if (b) setColour(b.dataset.colour);
+  });
   $('#fit').addEventListener('click', () => Graph.zoomToFit(900, 40));
 
-  // ---------- header + legend ----------
-  const c = data.counts;
-  $('#stats').textContent = `${c.notes} notes · ${c.links.toLocaleString()} links · Issues 1–${data.issues}`;
-  $('#updated').textContent = `Updated ${new Date(data.generated).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}.`;
+  // ---------- title + index ----------
+  $('#stats').textContent = `${c.notes} notes · ${c.links.toLocaleString()} links · issues 01–${String(data.issues).padStart(2, '0')}`;
+  $('#updated').textContent = `Updated ${new Date(data.generated).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.`;
 
+  const glyph = (n) => `<i class="g ${n.type}" style="--c:${catOf(n)}"></i>`;
   $('#types').innerHTML = TYPES.map((t) => `
     <button data-type="${t}" aria-pressed="true">
-      <b><i class="glyph ${t}"></i>${TYPE_PLURAL[t]}</b><span>${c[`${t}s`]}</span>
+      <b><i class="g ${t}"></i>${TYPE_PLURAL[t]}</b><span>n=${c[`${t}s`]}</span>
     </button>`).join('');
   $('#types').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]');
@@ -384,8 +509,16 @@ async function main() {
   const members = new Map();
   for (const n of nodes) if (n.type === 'mechanism') members.set(n.domain, (members.get(n.domain) || 0) + 1);
   const domainList = $('#domains');
-  domainList.innerHTML = data.domainOrder.map((id) => byId.get(id)).map((d) => `
-    <li><button data-id="${d.id}" style="--c:${colorOf(d)}"><i class="dot"></i><span>${esc(d.title)}</span><span class="count">${members.get(d.id) || 0}</span></button></li>`).join('');
+  const fieldRows = [];
+  for (let f = 0; f < data.fields; f++) {
+    const ds = data.domainOrder.map((id) => byId.get(id)).filter((d) => d.field === f);
+    const total = ds.reduce((sum, d) => sum + (members.get(d.id) || 0), 0);
+    fieldRows.push(`<li class="fhead" style="--c:${CAT[f]}"><i class="sw"></i>Field ${String(f + 1).padStart(2, '0')}<span>${ds.length} dom · n=${total}</span></li>`);
+    for (const d of ds) {
+      fieldRows.push(`<li><button data-id="${d.id}">${glyph(d)}<span>${esc(d.title)}</span><span class="count">${members.get(d.id) || 0}</span></button></li>`);
+    }
+  }
+  domainList.innerHTML = fieldRows.join('');
   domainList.addEventListener('click', (e) => {
     const b = e.target.closest('[data-id]');
     if (!b) return;
@@ -408,12 +541,21 @@ async function main() {
   };
   $('#legend-toggle').addEventListener('click', () => setLegend(!document.body.classList.contains('legend-open')));
 
-  // ---------- note panel with 2D local graph ----------
+  // ---------- note card with its 2D local graph ----------
   const panel = $('#panel');
+
+  // SVG versions of the three marks, so the figure reads like a plate from the same diagram.
+  function mark(n, x, y, r, fill) {
+    const f = (v) => v.toFixed(1);
+    const sw = r > 6 ? 1.5 : 1;
+    if (n.type === 'domain') return `<rect x="${f(x - r)}" y="${f(y - r)}" width="${f(2 * r)}" height="${f(2 * r)}" fill="${fill}" stroke="${INK}" stroke-width="${sw}"/>`;
+    if (n.type === 'source') return `<path d="M${f(x)} ${f(y - r * 1.25)}L${f(x + r * 1.25)} ${f(y)}L${f(x)} ${f(y + r * 1.25)}L${f(x - r * 1.25)} ${f(y)}Z" fill="${fill}" stroke="${INK}" stroke-width="${sw}"/>`;
+    return `<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="${fill}" stroke="${INK}" stroke-width="${sw}"/>`;
+  }
 
   function egoGraph(n) {
     const nb = [...adj.get(n)].sort((a, b) =>
-      TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || hueOf(a) - hueOf(b) || a.title.localeCompare(b.title));
+      TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || (fieldOf(a) ?? 9) - (fieldOf(b) ?? 9) || a.title.localeCompare(b.title));
     const S = 320;
     const C = S / 2;
     const R = 128;
@@ -435,26 +577,23 @@ async function main() {
         chordCount++;
       }
     }
-    const r = nb.length > 70 ? 2.6 : nb.length > 30 ? 3.4 : 4.6;
-    const spokes = nb.map((m) => `<line x1="${C}" y1="${C}" x2="${f(pt.get(m)[0])}" y2="${f(pt.get(m)[1])}" stroke="${colorOf(m)}"/>`).join('');
-    const dots = nb.map((m) => {
+    const r = nb.length > 70 ? 2.4 : nb.length > 30 ? 3.2 : 4.4;
+    const spokes = nb.map((m) => `<line x1="${C}" y1="${C}" x2="${f(pt.get(m)[0])}" y2="${f(pt.get(m)[1])}"/>`).join('');
+    const marks = nb.map((m) => {
       const [x, y] = pt.get(m);
-      const rr = m.type === 'domain' ? r * 1.7 : r;
-      const mark = m.type === 'source'
-        ? `<circle cx="${f(x)}" cy="${f(y)}" r="${rr}" fill="#05060a" stroke="${colorOf(m)}" stroke-width="1.4"/>`
-        : `<circle cx="${f(x)}" cy="${f(y)}" r="${rr}" fill="${colorOf(m)}"/>`;
-      return `<g data-id="${m.id}">${mark}<circle class="hit" cx="${f(x)}" cy="${f(y)}" r="${Math.max(rr + 3, 8)}"/></g>`;
+      const rr = m.type === 'domain' ? r * 1.3 : r;
+      return `<g data-id="${m.id}">${mark(m, x, y, rr, fillOf(m))}<circle class="hit" cx="${f(x)}" cy="${f(y)}" r="${Math.max(rr + 3, 8)}"/></g>`;
     }).join('');
+    const centre = state.colour === 'ink' ? ORANGE : fillOf(n);
     const svg = `
-      <svg viewBox="0 0 ${S} ${S}" role="img" aria-label="Local graph: ${nb.length} notes connected to ${esc(n.title)}">
-        <defs><radialGradient id="ego-glow"><stop offset="0" stop-color="${colorOf(n)}" stop-opacity=".6"/><stop offset="1" stop-color="${colorOf(n)}" stop-opacity="0"/></radialGradient></defs>
+      <svg viewBox="0 0 ${S} ${S}" role="img" aria-label="Local graph: ${nb.length} notes connected to ${esc(n.title)}" style="--accent:${accent()}">
+        <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${INK}" stroke-opacity=".12" stroke-dasharray="2 4"/>
         <g class="chords">${chords}</g>
         <g class="spokes">${spokes}</g>
-        <circle cx="${C}" cy="${C}" r="38" fill="url(#ego-glow)"/>
-        <circle cx="${C}" cy="${C}" r="9" fill="${colorOf(n)}"/>
-        <g class="dots">${dots}</g>
+        ${mark(n, C, C, 9, centre)}
+        <g class="marks">${marks}</g>
       </svg>`;
-    const caption = `${nb.length} direct connections · ${chordCount} links among them`;
+    const caption = `n=${nb.length} direct · ${chordCount} links among them`;
     return { svg, caption };
   }
 
@@ -469,26 +608,31 @@ async function main() {
       .filter(([, g]) => g.length);
     const ego = egoGraph(n);
     const domains = (n.domains || []).map((id) => byId.get(id));
-    panel.style.setProperty('--c', colorOf(n));
+    const field = fieldOf(n);
     panel.innerHTML = `
-      <button class="close" data-close aria-label="Close note">×</button>
-      <div class="panel-meta"><i class="dot sm"></i>${TYPE_LABEL[n.type]} · ${issueLabel(n)}</div>
-      <h2>${esc(n.title)}</h2>
-      ${n.claim ? `<p class="claim">${esc(n.claim)}</p>` : ''}
-      ${n.type === 'source' ? `<p class="byline">${esc(n.author || '')}${n.date ? ` · ${esc(n.date)}` : ''}</p>` : ''}
-      ${n.url ? `<a class="essay" href="${esc(n.url)}" target="_blank" rel="noopener">Read the essay on worksinprogress.co ↗</a>` : ''}
-      ${domains.length ? `<div class="chips">${domains.map((d) => `<button class="chip" data-id="${d.id}" style="--c:${colorOf(d)}"><i class="dot sm"></i>${esc(d.title)}</button>`).join('')}</div>` : ''}
-      <section class="ego">
-        <h3>Local graph <span>2D</span></h3>
-        ${ego.svg}
-        <p class="ego-caption" id="ego-caption" data-default="${esc(ego.caption)}">${esc(ego.caption)}</p>
-      </section>
-      <section class="conn">
-        ${groups.map(([t, g]) => `
-          <h3>${TYPE_PLURAL[t]} <span>${g.length}</span></h3>
-          <ul>${g.map((m) => `<li><button data-id="${m.id}" style="--c:${colorOf(m)}"><i class="dot sm"></i><span>${esc(m.title)}</span><span class="iss">#${m.issue}</span></button></li>`).join('')}</ul>`).join('')}
-      </section>`;
-    panel.scrollTop = 0;
+      <div class="tab">◆ 03 — ${TYPE_LABEL[n.type]}</div>
+      <button class="close btn" data-close aria-label="Close note">×</button>
+      <div class="scroll">
+        <div class="meta">
+          <span class="eyebrow">${TYPE_NUM[n.type]} ${TYPE_LABEL[n.type]}</span>
+          <span class="iss">${issueLabel(n)}${field !== undefined ? ` · Field ${String(field + 1).padStart(2, '0')}` : ''}</span>
+        </div>
+        <h2>${esc(n.title)}</h2>
+        ${n.claim ? `<p class="claim">${esc(n.claim)}</p>` : ''}
+        ${n.type === 'source' ? `<p class="byline">${esc(n.author || '')}${n.date ? ` · ${esc(n.date)}` : ''}</p>` : ''}
+        ${n.url ? `<a class="essay" href="${esc(n.url)}" target="_blank" rel="noopener">Read the essay ↗</a>` : ''}
+        ${domains.length ? `<div class="chips">${domains.map((d) => `<button class="chip" data-id="${d.id}">${glyph(d)}${esc(d.title)}</button>`).join('')}</div>` : ''}
+        <h3>Fig. 01 — Local graph <span>2D</span></h3>
+        <figure class="fig crop">
+          ${ego.svg}
+          <figcaption id="ego-caption" data-default="${esc(ego.caption)}">${esc(ego.caption)}</figcaption>
+        </figure>
+        <section class="conn">
+          ${groups.map(([t, g]) => `
+            <h3>${TYPE_PLURAL[t]} <span>n=${g.length}</span></h3>
+            <ul>${g.map((m) => `<li><button data-id="${m.id}">${glyph(m)}<span>${esc(m.title)}</span><span class="iss">${pad(m.issue)}</span></button></li>`).join('')}</ul>`).join('')}
+        </section>
+      </div>`;
   }
 
   panel.addEventListener('click', (e) => {
@@ -496,19 +640,19 @@ async function main() {
     const b = e.target.closest('[data-id]');
     if (b) select(byId.get(+b.dataset.id));
   });
-  // Hovering anything in the panel lights the same note up in the big graph.
+  // Hovering anything in the card lights the same note up in the big diagram.
   panel.addEventListener('mouseover', (e) => {
     const b = e.target.closest('[data-id]');
     const n = b ? byId.get(+b.dataset.id) : null;
     if (n === state.hover) return;
     state.hover = n;
     refresh();
-    const svg = panel.querySelector('.ego svg');
+    const svg = panel.querySelector('.fig svg');
     const cap = panel.querySelector('#ego-caption');
     if (!svg) return;
     svg.classList.toggle('hovering', !!n && !!b.closest('svg'));
     for (const p of svg.querySelectorAll('.chords path')) p.classList.toggle('on', !!n && (+p.dataset.a === n.id || +p.dataset.b === n.id));
-    cap.innerHTML = n ? `<b>${esc(n.title)}</b>${TYPE_LABEL[n.type]} · ${issueLabel(n)}` : esc(cap.dataset.default);
+    cap.innerHTML = n ? `<b>${esc(n.title)}</b>${TYPE_NUM[n.type]} ${TYPE_LABEL[n.type]} · ${issueLabel(n)}` : esc(cap.dataset.default);
   });
   panel.addEventListener('mouseleave', () => {
     state.hover = null;
@@ -526,8 +670,8 @@ async function main() {
     list.hidden = !open;
     input.setAttribute('aria-expanded', String(open));
     list.innerHTML = results.length
-      ? results.map((n, i) => `<li role="option" id="r${i}" aria-selected="${i === active}"><button tabindex="-1" data-id="${n.id}" style="--c:${colorOf(n)}"><i class="dot sm"></i><span>${esc(n.title)}</span><em>${TYPE_LABEL[n.type]}</em></button></li>`).join('')
-      : '<li class="empty">No notes match</li>';
+      ? results.map((n, i) => `<li role="option" id="r${i}" aria-selected="${i === active}"><button tabindex="-1" data-id="${n.id}">${glyph(n)}<span>${esc(n.title)}</span><em>${TYPE_LABEL[n.type]}</em></button></li>`).join('')
+      : '<li class="empty">No notes match — n=0</li>';
     if (active >= 0) input.setAttribute('aria-activedescendant', `r${active}`);
     else input.removeAttribute('aria-activedescendant');
   }

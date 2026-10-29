@@ -28,6 +28,7 @@ DATE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)? ([A-Z][a-z]+),? (\d{4})\b")
 AUTHOR = re.compile(r"\s*(.+?),\s*(?:[\"“]|Works in Progress|Issue\b)")
 SUMMARY_SECTION = {"source": "Core claim", "mechanism": "Definition", "domain": "Core problem"}
 MAX_CLAIM = 520
+MAX_FIELDS = 6
 
 
 def clean_name(name):
@@ -154,23 +155,44 @@ def build_graph(vault):
             if votes:
                 n["domain"] = votes.most_common(1)[0][0]
 
-    # Order domains so related fields sit next to each other on the colour wheel.
+    # Group domains into at most MAX_FIELDS "fields" (the brand allows six categorical colours) by
+    # greedy modularity merging: join the two groups whose notes link more than their size predicts.
     domains = [i for i in range(len(notes)) if kind[i] == "domain"]
-    affinity = Counter()
+    volume, affinity = Counter(), Counter()
     for a, b in edges:
         da, db = notes[a].get("domain"), notes[b].get("domain")
-        if da is not None and db is not None and da != db:
+        if da is None or db is None:
+            continue
+        volume[da] += 1
+        volume[db] += 1
+        if da != db:
             affinity[frozenset((da, db))] += 1
-    order = [max(domains, key=lambda d: len(nbrs[d]))] if domains else []
-    while len(order) < len(domains):
-        last = order[-1]
-        order.append(max((d for d in domains if d not in order), key=lambda d: (affinity[frozenset((last, d))], -d)))
+
+    m = sum(volume.values()) / 2 or 1
+
+    def gain(pair):
+        x, y = clusters[pair[0]], clusters[pair[1]]
+        between = sum(affinity[frozenset((a, b))] for a in x for b in y)
+        return between / m - sum(volume[a] for a in x) * sum(volume[b] for b in y) / (2 * m * m)
+
+    clusters = [[d] for d in domains]
+    while len(clusters) > MAX_FIELDS:
+        i, j = max(((i, j) for i in range(len(clusters)) for j in range(i + 1, len(clusters))), key=gain)
+        clusters[i] += clusters.pop(j)
+    members = Counter(n.get("domain") for n in notes if n["type"] == "mechanism")
+    clusters.sort(key=lambda c: -sum(members[d] for d in c))
+    order = []
+    for f, cluster in enumerate(clusters):
+        for d in sorted(cluster, key=lambda d: (-members[d], d)):
+            notes[d]["field"] = f
+            order.append(d)
 
     nodes = [{"id": i, **{k: v for k, v in n.items() if v not in (None, "", [])}} for i, n in enumerate(notes)]
     counts = Counter(kind)
     return {
         "issues": max((n["issue"] for n in notes if n["type"] == "source"), default=0),
         "counts": {"notes": len(notes), "links": len(edges), **{f"{k}s": v for k, v in counts.items()}},
+        "fields": len(clusters),
         "domainOrder": order,
         "nodes": nodes,
         "links": [list(e) for e in sorted(edges)],
