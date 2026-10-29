@@ -24,7 +24,7 @@ Every `[[wikilink]]` in the vault is a pencil-weight line.
 - **Timeline:** press play to watch the brain grow issue by issue.
 - **Search:** press `/`. Domains in the index are clickable. Every note has a shareable link (`…/wip-brain/#Note Title`).
 
-The look follows the [PROFSARTHAK design system](https://github.com/profsarthak/personal-brand): bone paper and a hairline drafting grid, near-black ink, one hot-orange accent, square cards with hard offset shadows, folder tabs and crop marks, a `SYS.TIME` status bar, and Space Grotesk / Space Mono / IBM Plex Sans.
+The look follows the [PROFSARTHAK design system](https://profsarthak.github.io/): bone paper and a hairline drafting grid, near-black ink, one hot-orange accent, square cards with hard offset shadows, folder tabs and crop marks, a `SYS.TIME` status bar, and Space Grotesk / Space Mono / IBM Plex Sans.
 
 ## Updating it
 
