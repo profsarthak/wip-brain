@@ -1,10 +1,10 @@
-# The Progress Brain
+# Progress Through Works
 
 An interactive 2D/3D map of my Obsidian second brain built from [Works in Progress](https://worksinprogress.co) magazine: every essay, the transferable mechanisms it argues for, and the fields those mechanisms belong to.
 
 **Live: https://profsarthak.github.io/wip-brain/**
 
-![The Progress Brain](docs/preview.jpg)
+![Progress Through Works](docs/preview.jpg)
 
 ## What you're looking at
 
