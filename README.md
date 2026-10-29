@@ -52,4 +52,11 @@ Only note titles, links, issue numbers, domain membership, and the first paragra
 - `publish.py`: standard-library Python. It parses the vault's folders, tags, sections and wikilinks, and groups domains into fields.
 - `docs/`: a static page with no build step. It uses [3d-force-graph](https://github.com/vasturiano/3d-force-graph) on three.js, with flat sprite marks, HTML labels for domains, and a hand-drawn SVG for the local graph. Brand tokens live at the top of `docs/style.css`.
 
-Unofficial reader project. Essays © their authors.
+## Licence
+
+The code (`publish.py` and everything in `docs/` except `graph.json`) is released under the
+[MIT License](LICENSE). The note text published in `docs/graph.json` — titles and each note's
+opening paragraph — is © Sarthak Vedant Mohanty and licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): reuse it freely, with credit.
+
+Unofficial reader project. The essays themselves are not included and remain © their authors.
