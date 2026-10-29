@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Progress Brain</title>
+  <meta name="description" content="An interactive 2D/3D map of a linked Obsidian second brain distilled from Works in Progress magazine: essays, the mechanisms they argue for, and the fields they belong to.">
+  <meta property="og:title" content="The Progress Brain">
+  <meta property="og:description" content="Essays from Works in Progress, the mechanisms they argue for, and the fields they belong to: an interactive 2D/3D second brain.">
+  <meta property="og:image" content="https://profsarthak.github.io/wip-brain/preview.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2305060a'/%3E%3Cg stroke='%23ece6d9' stroke-opacity='.5'%3E%3Cpath d='M9 11 16 17 23 10M16 17 12 24M16 17 22 22'/%3E%3C/g%3E%3Ccircle cx='16' cy='17' r='3.5' fill='%23f0c46c'/%3E%3Ccircle cx='9' cy='11' r='2' fill='%2378b7ff'/%3E%3Ccircle cx='23' cy='10' r='2' fill='%23ff8fa8'/%3E%3Ccircle cx='12' cy='24' r='2' fill='%2389e0b0'/%3E%3Ccircle cx='22' cy='22' r='2' fill='%23c9a2ff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://esm.sh/three@0.180.0",
+        "three/examples/jsm/": "https://esm.sh/three@0.180.0/examples/jsm/",
+        "3d-force-graph": "https://esm.sh/3d-force-graph@1.80.1?deps=three@0.180.0"
+      }
+    }
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="graph" aria-label="Interactive network of linked notes"></div>
+
+  <header class="brand">
+    <div class="kicker">A reader's map of <a href="https://worksinprogress.co" target="_blank" rel="noopener">Works in Progress</a></div>
+    <h1>The Progress <em>Brain</em></h1>
+    <div class="stats" id="stats">&nbsp;</div>
+  </header>
+
+  <div class="search">
+    <svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+    <input id="q" type="search" placeholder="Search notes" autocomplete="off" spellcheck="false"
+           role="combobox" aria-expanded="false" aria-controls="results" aria-autocomplete="list" aria-label="Search notes">
+    <kbd>/</kbd>
+    <ul id="results" class="results glass" role="listbox" hidden></ul>
+  </div>
+
+  <button id="legend-toggle" class="icon-btn glass" aria-expanded="false" aria-controls="legend" aria-label="Show domains">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="14" r="2"/><path d="M10 6h7M10 14h7"/></svg>
+  </button>
+
+  <aside id="legend" class="glass" aria-label="Filters and domains">
+    <div class="types" id="types"></div>
+    <h2 class="legend-head">Domains <span>colour = field</span></h2>
+    <ol id="domains"></ol>
+    <p class="credit">Notes distilled from essays in <a href="https://worksinprogress.co" target="_blank" rel="noopener">Works in Progress</a>. Unofficial reader project; essays &copy; their authors. <span id="updated"></span></p>
+  </aside>
+
+  <div class="view">
+    <div class="seg glass" id="view" role="group" aria-label="View">
+      <button data-mode="3d" aria-pressed="true">3D</button>
+      <button data-mode="2d" aria-pressed="false">2D</button>
+    </div>
+    <button id="fit" class="icon-btn glass" aria-label="Fit whole brain in view" title="Fit to view">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg>
+    </button>
+  </div>
+
+  <aside id="panel" class="glass" aria-live="polite" inert></aside>
+
+  <div class="timeline glass">
+    <button id="play" class="play" aria-label="Play the brain growing issue by issue">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="i-play" d="M6 4v12l10-6z"/><path class="i-pause" d="M5 4h3.5v12H5zM11.5 4H15v12h-3.5z"/></svg>
+    </button>
+    <label class="tl-track">
+      <span class="sr-only">Show notes up to issue</span>
+      <input id="issue" type="range" min="1" step="1">
+    </label>
+    <output id="tl-label" for="issue"></output>
+  </div>
+
+  <div id="loading"><span>Growing the brain…</span></div>
+</body>
+</html>
