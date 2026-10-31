@@ -225,17 +225,25 @@ def main():
     except (FileNotFoundError, json.JSONDecodeError):
         previous = None
     if previous == graph:
-        print("Graph unchanged; nothing to publish.")
-        return
+        # A --no-push preview may already have written this graph without committing it.
+        pending = git("status", "--porcelain", "--", "docs/graph.json").stdout.strip()
+        if args.no_push or not pending:
+            print("Graph unchanged; nothing to publish.")
+            return
+        print("Graph matches the last --no-push preview; publishing it.")
+    else:
+        graph = {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), **graph}
+        tmp = OUT.with_suffix(".tmp")
+        tmp.write_text(json.dumps(graph, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(OUT)
+        print(f"Wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size / 1024:.0f} KB)")
+        if args.no_push:
+            return
 
-    graph = {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), **graph}
-    tmp = OUT.with_suffix(".tmp")
-    tmp.write_text(json.dumps(graph, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    tmp.replace(OUT)
-    print(f"Wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size / 1024:.0f} KB)")
-    if args.no_push:
-        return
-
+    # Pick up anything pushed from elsewhere (e.g. edits on github.com) so our push fast-forwards.
+    pull = git("pull", "--ff-only", "--quiet", check=False)
+    if pull.returncode:
+        sys.exit(f"Couldn't fast-forward to the remote before committing:\n{pull.stderr}")
     git("add", "docs/graph.json")
     git("commit", "-m", f"Update brain: {c['notes']} notes, {c['links']} links (Issues 1-{graph['issues']})")
     push = git("push", check=False)
