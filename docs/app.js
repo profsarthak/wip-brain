@@ -512,6 +512,7 @@ async function main() {
   const fieldRows = [];
   for (let f = 0; f < data.fields; f++) {
     const ds = data.domainOrder.map((id) => byId.get(id)).filter((d) => d.field === f);
+    if (!ds.length) continue; // fields keep their number across updates, so one can end up empty
     const total = ds.reduce((sum, d) => sum + (members.get(d.id) || 0), 0);
     fieldRows.push(`<li class="fhead" style="--c:${CAT[f]}"><i class="sw"></i>Field ${String(f + 1).padStart(2, '0')}<span>${ds.length} dom · n=${total}</span></li>`);
     for (const d of ds) {
